@@ -30,7 +30,9 @@ exports.getDashboard = async (req, res) => {
     
     // Critical campaigns
     const [criticalCampaigns] = await db.query(
-      `SELECT COUNT(*) as count FROM campaigns WHERE severity = 'critical'`
+      `SELECT COUNT(*) as count FROM campaigns c
+       JOIN severities s ON c.severity_id = s.severity_id
+       WHERE s.level = 'critical'`
     );
     
     // Recent high-confidence indicators
@@ -43,19 +45,21 @@ exports.getDashboard = async (req, res) => {
     
     // Indicator type distribution
     const [indicatorTypes] = await db.query(
-      `SELECT type, COUNT(*) as count 
-       FROM indicators 
-       GROUP BY type 
+      `SELECT it.name as type, COUNT(*) as count 
+       FROM indicators i
+       JOIN indicator_types it ON i.type_id = it.type_id
+       GROUP BY it.name 
        ORDER BY count DESC`
     );
     
     // Campaign severity distribution
     const [campaignSeverity] = await db.query(
-      `SELECT severity, COUNT(*) as count 
-       FROM campaigns 
-       GROUP BY severity 
+      `SELECT s.level as severity, COUNT(*) as count 
+       FROM campaigns c
+       JOIN severities s ON c.severity_id = s.severity_id
+       GROUP BY s.level 
        ORDER BY 
-         CASE severity
+         CASE s.level
            WHEN 'critical' THEN 1
            WHEN 'high' THEN 2
            WHEN 'medium' THEN 3
@@ -108,11 +112,11 @@ exports.getActorTrends = async (req, res) => {
       `SELECT 
          a.actor_id,
          a.name,
-         a.last_activity,
+         a.last_seen as last_activity,
          COUNT(ia.indicator_id) as indicator_count
        FROM threat_actors a
        LEFT JOIN indicator_actor ia ON a.actor_id = ia.actor_id
-       GROUP BY a.actor_id, a.name, a.last_activity
+       GROUP BY a.actor_id, a.name, a.last_seen
        HAVING indicator_count > 0
        ORDER BY indicator_count DESC
        LIMIT 10`
@@ -128,9 +132,10 @@ exports.getActorTrends = async (req, res) => {
 exports.getTypeDistribution = async (req, res) => {
   try {
     const [distribution] = await db.query(
-      `SELECT type, COUNT(*) as count 
-       FROM indicators 
-       GROUP BY type 
+      `SELECT it.name as type, COUNT(*) as count 
+       FROM indicators i
+       JOIN indicator_types it ON i.type_id = it.type_id
+       GROUP BY it.name 
        ORDER BY count DESC`
     );
     
@@ -194,14 +199,15 @@ exports.getCampaignTimeline = async (req, res) => {
   try {
     const [timeline] = await db.query(
       `SELECT 
-         campaign_id,
-         name,
-         start_date,
-         end_date,
-         severity,
-         DATEDIFF(COALESCE(end_date, CURDATE()), start_date) as duration_days
-       FROM campaigns
-       ORDER BY start_date DESC`
+         c.campaign_id,
+         c.name,
+         c.start_date,
+         c.end_date,
+         s.level as severity,
+         DATEDIFF(COALESCE(c.end_date, CURDATE()), c.start_date) as duration_days
+       FROM campaigns c
+       LEFT JOIN severities s ON c.severity_id = s.severity_id
+       ORDER BY c.start_date DESC`
     );
     
     res.json(timeline);
@@ -214,15 +220,16 @@ exports.getCampaignTimeline = async (req, res) => {
 exports.getSeverityDistribution = async (req, res) => {
   try {
     const [distribution] = await db.query(
-      `SELECT severity, COUNT(*) as count 
-       FROM campaigns 
-       GROUP BY severity 
+      `SELECT s.level as severity, COUNT(*) as count 
+       FROM campaigns c
+       JOIN severities s ON c.severity_id = s.severity_id
+       GROUP BY s.level 
        ORDER BY 
-         CASE severity
-           WHEN 'Critical' THEN 1
-           WHEN 'High' THEN 2
-           WHEN 'Medium' THEN 3
-           WHEN 'Low' THEN 4
+         CASE s.level
+           WHEN 'critical' THEN 1
+           WHEN 'high' THEN 2
+           WHEN 'medium' THEN 3
+           WHEN 'low' THEN 4
          END`
     );
     

@@ -255,7 +255,7 @@ function ActorModal({ actor, onClose, onSave }) {
             <input
               type="date"
               className="form-control"
-              value={formData.last_activity}
+              value={formData.last_seen}
               onChange={(e) => setFormData({...formData, last_activity: e.target.value})}
             />
           </div>

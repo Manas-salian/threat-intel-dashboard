@@ -28,7 +28,7 @@ exports.getActorsByIndicator = async (req, res) => {
        JOIN indicator_actor ia ON a.actor_id = ia.actor_id
        JOIN indicators i ON ia.indicator_id = i.indicator_id
        WHERE i.value = ?
-       ORDER BY a.last_activity DESC`,
+       ORDER BY a.last_seen DESC`,
       [req.params.value]
     );
     

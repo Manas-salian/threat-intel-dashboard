@@ -65,7 +65,7 @@ function Analytics() {
         <p>Visualize threat intelligence trends and patterns</p>
       </div>
 
-      <div className="card">
+      {/* <div className="card">
         <div className="card-header">
           <h3 className="card-title">Indicator Timeline (Last 30 Days)</h3>
         </div>
@@ -81,7 +81,7 @@ function Analytics() {
             <Line type="monotone" dataKey="count" stroke="#6366f1" strokeWidth={2} name="New Indicators" />
           </LineChart>
         </ResponsiveContainer>
-      </div>
+      </div> */}
 
       <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '24px'}}>
         <div className="card">

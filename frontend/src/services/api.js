@@ -15,6 +15,7 @@ export const indicatorAPI = {
   getById: (id) => api.get(`/indicators/${id}`),
   getByType: (type) => api.get(`/indicators/type/${type}`),
   create: (data) => api.post('/indicators', data),
+  bulkIngest: (data) => api.post('/indicators/bulk', data),
   update: (id, data) => api.put(`/indicators/${id}`, data),
   delete: (id) => api.delete(`/indicators/${id}`),
 };
@@ -69,6 +70,21 @@ export const ingestAPI = {
   ingestIndicators: (data) => api.post('/ingest/indicators', data),
   ingestExternal: (data) => api.post('/ingest/external', data),
   getStatus: () => api.get('/ingest/status'),
+};
+
+// Tools API
+export const toolsAPI = {
+  checkIndicator: (value) => api.post('/tools/check', { value }),
+  backup: () => api.post('/tools/backup'),
+  restore: (filename) => api.post('/tools/restore', { filename }),
+  listBackups: () => api.get('/tools/backups'),
+};
+
+// Advanced Dashboard API
+export const advancedDashboardAPI = {
+  getStats: () => api.get('/dashboard/stats'),
+  getAuditLogs: () => api.get('/dashboard/audit-logs'),
+  getTopActors: () => api.get('/dashboard/top-actors'),
 };
 
 export default api;

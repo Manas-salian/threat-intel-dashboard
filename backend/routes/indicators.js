@@ -26,6 +26,9 @@ router.get('/:id/sources', indicatorController.getSources);
 // Create new indicator
 router.post('/', indicatorController.create);
 
+// Bulk ingest indicators
+router.post('/bulk', indicatorController.bulkIngest);
+
 // Update indicator
 router.put('/:id', indicatorController.update);
 

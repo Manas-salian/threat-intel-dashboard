@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Upload, Database, CheckCircle, XCircle } from 'lucide-react';
-import { ingestAPI } from '../services/api';
+import { indicatorAPI } from '../services/api';
 
 function Ingestion() {
   const [jsonData, setJsonData] = useState('');
@@ -15,14 +15,14 @@ function Ingestion() {
 
     try {
       const indicators = JSON.parse(jsonData);
-      const response = await ingestAPI.ingestIndicators({
+      const response = await indicatorAPI.bulkIngest({
         indicators: Array.isArray(indicators) ? indicators : [indicators],
         sourceId: parseInt(sourceId)
       });
       
       setResult({
         success: true,
-        message: `Successfully ingested ${response.data.inserted} indicators`
+        message: `Successfully ingested ${response.data.inserted} indicators (${response.data.skipped} skipped/updated, ${response.data.total} total)`
       });
       setJsonData('');
     } catch (error) {

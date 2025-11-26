@@ -17,6 +17,9 @@ app.use('/api/sources', require('./routes/sources'));
 app.use('/api/analytics', require('./routes/analytics'));
 app.use('/api/correlations', require('./routes/correlations'));
 app.use('/api/ingest', require('./routes/ingest'));
+app.use('/api/tools', require('./routes/tools'));
+// Mount advanced dashboard routes (audit logs, admin endpoints)
+app.use('/api/dashboard', require('./routes/dashboard_advanced'));
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -26,9 +29,9 @@ app.get('/api/health', (req, res) => {
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  res.status(500).json({ 
-    error: 'Something went wrong!', 
-    message: err.message 
+  res.status(500).json({
+    error: 'Something went wrong!',
+    message: err.message
   });
 });
 

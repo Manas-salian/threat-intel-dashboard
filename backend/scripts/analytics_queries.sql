@@ -35,10 +35,10 @@ ORDER BY count DESC;
 -- 5. Most active threat actors (by number of indicators)
 SELECT ta.name, 
        COUNT(DISTINCT ia.indicator_id) as indicator_count,
-       ta.last_activity
+       ta.last_seen
 FROM threat_actors ta
 JOIN indicator_actor ia ON ta.actor_id = ia.actor_id
-GROUP BY ta.actor_id, ta.name, ta.last_activity
+GROUP BY ta.actor_id, ta.name, ta.last_seen
 ORDER BY indicator_count DESC;
 
 -- 6. Most reported sources

@@ -243,18 +243,36 @@ function IndicatorModal({ indicator, onClose, onSave }) {
     description: indicator?.description || '',
   });
 
+  // Map type names to type_ids (based on normalized schema)
+  const typeMap = {
+    'IPv4': 1,
+    'IPv6': 2,
+    'domain': 3,
+    'url': 4,
+    'hash': 5,
+    'email': 6
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
+      // Convert type name to type_id for backend
+      const dataToSend = {
+        ...formData,
+        type_id: typeMap[formData.type],
+        type: undefined // Remove type field
+      };
+      delete dataToSend.type;
+
       if (indicator) {
-        await indicatorAPI.update(indicator.indicator_id, formData);
+        await indicatorAPI.update(indicator.indicator_id, dataToSend);
       } else {
-        await indicatorAPI.create(formData);
+        await indicatorAPI.create(dataToSend);
       }
       onSave();
     } catch (error) {
       console.error('Error saving indicator:', error);
-      alert('Failed to save indicator');
+      alert(error.response?.data?.error || 'Failed to save indicator');
     }
   };
 
