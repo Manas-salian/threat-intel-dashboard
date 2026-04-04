@@ -1,25 +1,14 @@
-const mysql = require('mysql2/promise');
+const mongoose = require('mongoose');
 require('dotenv').config();
 
-const pool = mysql.createPool({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  port: process.env.DB_PORT,
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/threat_intelligence';
+
+mongoose.connect(MONGODB_URI)
+  .then(() => console.log('✓ MongoDB connected successfully'))
+  .catch(err => console.error('✗ MongoDB connection failed:', err.message));
+
+mongoose.connection.on('error', err => {
+  console.error('MongoDB connection error:', err.message);
 });
 
-// Test the connection
-pool.getConnection()
-  .then(connection => {
-    console.log('✓ Database connected successfully');
-    connection.release();
-  })
-  .catch(err => {
-    console.error('✗ Database connection failed:', err.message);
-  });
-
-module.exports = pool;
+module.exports = mongoose;

@@ -1,41 +1,24 @@
-const db = require('../config/database');
+const ThreatActor = require('../models/ThreatActor');
+const Indicator = require('../models/Indicator');
 
 // Get all threat actors
 exports.getAll = async (req, res) => {
   try {
     const { page = 1, limit = 50, search } = req.query;
-    const offset = (page - 1) * limit;
+    const skip = (page - 1) * limit;
 
-    let query = `
-        SELECT ta.*, GROUP_CONCAT(t.name) as tactics
-        FROM threat_actors ta
-        LEFT JOIN actor_tactics at ON ta.actor_id = at.actor_id
-        LEFT JOIN tactics t ON at.tactic_id = t.tactic_id
-        WHERE 1=1
-    `;
-    const params = [];
-
+    const filter = {};
     if (search) {
-      query += ' AND (ta.name LIKE ? OR ta.description LIKE ?)';
-      params.push(`%${search}%`, `%${search}%`);
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } }
+      ];
     }
 
-    query += ' GROUP BY ta.actor_id ORDER BY ta.last_seen DESC LIMIT ? OFFSET ?';
-    params.push(parseInt(limit), offset);
-
-    const [actors] = await db.query(query, params);
-
-    // Get total count
-    let countQuery = 'SELECT COUNT(*) as total FROM threat_actors WHERE 1=1';
-    const countParams = [];
-
-    if (search) {
-      countQuery += ' AND (name LIKE ? OR description LIKE ?)';
-      countParams.push(`%${search}%`, `%${search}%`);
-    }
-
-    const [countResult] = await db.query(countQuery, countParams);
-    const total = countResult[0].total;
+    const [actors, total] = await Promise.all([
+      ThreatActor.find(filter).sort({ last_seen: -1 }).skip(skip).limit(parseInt(limit)).lean(),
+      ThreatActor.countDocuments(filter)
+    ]);
 
     res.json({
       actors,
@@ -54,21 +37,9 @@ exports.getAll = async (req, res) => {
 // Get single actor by ID
 exports.getById = async (req, res) => {
   try {
-    const [actors] = await db.query(
-      `SELECT ta.*, GROUP_CONCAT(t.name) as tactics, GROUP_CONCAT(t.tactic_id) as tactic_ids
-       FROM threat_actors ta
-       LEFT JOIN actor_tactics at ON ta.actor_id = at.actor_id
-       LEFT JOIN tactics t ON at.tactic_id = t.tactic_id
-       WHERE ta.actor_id = ?
-       GROUP BY ta.actor_id`,
-      [req.params.id]
-    );
-
-    if (actors.length === 0) {
-      return res.status(404).json({ error: 'Actor not found' });
-    }
-
-    res.json(actors[0]);
+    const actor = await ThreatActor.findById(req.params.id).lean();
+    if (!actor) return res.status(404).json({ error: 'Actor not found' });
+    res.json(actor);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -77,41 +48,17 @@ exports.getById = async (req, res) => {
 // Create new actor
 exports.create = async (req, res) => {
   try {
-    const { name, description, first_seen, last_seen, origin_country, tactic_ids } = req.body;
+    const { name, description, first_seen, last_seen, origin_country, tactics } = req.body;
 
-    const connection = await db.getConnection();
-    await connection.beginTransaction();
+    const actor = await ThreatActor.create({
+      name, description, first_seen, last_seen, origin_country,
+      tactics: tactics || []
+    });
 
-    try {
-      const [result] = await connection.query(
-        `INSERT INTO threat_actors (name, description, first_seen, last_seen, origin_country) 
-        VALUES (?, ?, ?, ?, ?)`,
-        [name, description, first_seen, last_seen, origin_country]
-      );
-
-      const actorId = result.insertId;
-
-      if (tactic_ids && Array.isArray(tactic_ids)) {
-        for (const tacticId of tactic_ids) {
-          await connection.query(
-            'INSERT INTO actor_tactics (actor_id, tactic_id) VALUES (?, ?)',
-            [actorId, tacticId]
-          );
-        }
-      }
-
-      await connection.commit();
-
-      res.status(201).json({
-        actor_id: actorId,
-        message: 'Threat actor created successfully'
-      });
-    } catch (err) {
-      await connection.rollback();
-      throw err;
-    } finally {
-      connection.release();
-    }
+    res.status(201).json({
+      _id: actor._id,
+      message: 'Threat actor created successfully'
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -120,44 +67,16 @@ exports.create = async (req, res) => {
 // Update actor
 exports.update = async (req, res) => {
   try {
-    const { name, description, first_seen, last_seen, origin_country, tactic_ids } = req.body;
+    const { name, description, first_seen, last_seen, origin_country, tactics } = req.body;
 
-    const connection = await db.getConnection();
-    await connection.beginTransaction();
+    const actor = await ThreatActor.findByIdAndUpdate(
+      req.params.id,
+      { name, description, first_seen, last_seen, origin_country, tactics },
+      { new: true, runValidators: true }
+    );
 
-    try {
-      const [result] = await connection.query(
-        `UPDATE threat_actors 
-        SET name = ?, description = ?, first_seen = ?, last_seen = ?, origin_country = ?
-        WHERE actor_id = ?`,
-        [name, description, first_seen, last_seen, origin_country, req.params.id]
-      );
-
-      if (result.affectedRows === 0) {
-        await connection.rollback();
-        return res.status(404).json({ error: 'Actor not found' });
-      }
-
-      if (tactic_ids && Array.isArray(tactic_ids)) {
-        // Replace tactics
-        await connection.query('DELETE FROM actor_tactics WHERE actor_id = ?', [req.params.id]);
-        for (const tacticId of tactic_ids) {
-          await connection.query(
-            'INSERT INTO actor_tactics (actor_id, tactic_id) VALUES (?, ?)',
-            [req.params.id, tacticId]
-          );
-        }
-      }
-
-      await connection.commit();
-      res.json({ message: 'Threat actor updated successfully' });
-
-    } catch (err) {
-      await connection.rollback();
-      throw err;
-    } finally {
-      connection.release();
-    }
+    if (!actor) return res.status(404).json({ error: 'Actor not found' });
+    res.json({ message: 'Threat actor updated successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -166,15 +85,14 @@ exports.update = async (req, res) => {
 // Delete actor
 exports.delete = async (req, res) => {
   try {
-    // Cascade delete handles relationships
-    const [result] = await db.query(
-      'DELETE FROM threat_actors WHERE actor_id = ?',
-      [req.params.id]
-    );
+    const actor = await ThreatActor.findByIdAndDelete(req.params.id);
+    if (!actor) return res.status(404).json({ error: 'Actor not found' });
 
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Actor not found' });
-    }
+    // Remove actor references from indicators
+    await Indicator.updateMany(
+      { actors: req.params.id },
+      { $pull: { actors: req.params.id } }
+    );
 
     res.json({ message: 'Threat actor deleted successfully' });
   } catch (error) {
@@ -185,16 +103,9 @@ exports.delete = async (req, res) => {
 // Get indicators associated with an actor
 exports.getIndicators = async (req, res) => {
   try {
-    const [indicators] = await db.query(
-      `SELECT i.*, it.name as type_name 
-       FROM indicators i
-       JOIN indicator_types it ON i.type_id = it.type_id
-       JOIN indicator_actor ia ON i.indicator_id = ia.indicator_id
-       WHERE ia.actor_id = ?
-       ORDER BY i.last_seen DESC`,
-      [req.params.id]
-    );
-
+    const indicators = await Indicator.find({ actors: req.params.id })
+      .sort({ last_seen: -1 })
+      .lean();
     res.json(indicators);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -204,18 +115,18 @@ exports.getIndicators = async (req, res) => {
 // Get campaigns associated with an actor
 exports.getCampaigns = async (req, res) => {
   try {
-    const [campaigns] = await db.query(
-      `SELECT DISTINCT c.*, s.level as severity_level
-       FROM campaigns c
-       LEFT JOIN severities s ON c.severity_id = s.severity_id
-       JOIN indicator_campaign ic ON c.campaign_id = ic.campaign_id
-       JOIN indicator_actor ia ON ic.indicator_id = ia.indicator_id
-       WHERE ia.actor_id = ?
-       ORDER BY c.start_date DESC`,
-      [req.params.id]
-    );
+    const indicators = await Indicator.find({ actors: req.params.id })
+      .populate('campaigns')
+      .lean();
 
-    res.json(campaigns);
+    // Extract unique campaigns from all linked indicators
+    const campaignMap = new Map();
+    for (const ind of indicators) {
+      for (const campaign of (ind.campaigns || [])) {
+        if (campaign?._id) campaignMap.set(campaign._id.toString(), campaign);
+      }
+    }
+    res.json(Array.from(campaignMap.values()));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -224,17 +135,18 @@ exports.getCampaigns = async (req, res) => {
 // Get actor profile with statistics
 exports.getProfile = async (req, res) => {
   try {
-    // Use the View v_actor_profile
-    const [profiles] = await db.query(
-      'SELECT * FROM v_actor_profile WHERE actor_id = ?',
-      [req.params.id]
-    );
+    const actor = await ThreatActor.findById(req.params.id).lean();
+    if (!actor) return res.status(404).json({ error: 'Actor not found' });
 
-    if (profiles.length === 0) {
-      return res.status(404).json({ error: 'Actor not found' });
-    }
+    const indicatorCount = await Indicator.countDocuments({ actors: req.params.id });
 
-    res.json(profiles[0]);
+    const campaignIds = await Indicator.distinct('campaigns', { actors: req.params.id });
+
+    res.json({
+      ...actor,
+      indicator_count: indicatorCount,
+      campaign_count: campaignIds.length,
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

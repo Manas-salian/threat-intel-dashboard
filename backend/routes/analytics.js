@@ -5,25 +5,28 @@ const analyticsController = require('../controllers/analyticsController');
 // Dashboard overview
 router.get('/dashboard', analyticsController.getDashboard);
 
-// Indicator timeline (called by frontend)
+// Indicator timeline
 router.get('/indicators/timeline', analyticsController.getIndicatorTrends);
 
-// Actor activity (called by frontend)
+// Actor activity
 router.get('/actors/activity', analyticsController.getActorTrends);
 
-// Campaign severity (called by frontend)
+// Campaign severity
 router.get('/campaigns/severity', analyticsController.getSeverityDistribution);
 
-// Source reliability (called by frontend)
+// Source reliability
 router.get('/sources/reliability', analyticsController.getSourceHeatmap);
 
-// Legacy routes (keep for backward compatibility)
-router.get('/trends/indicators', analyticsController.getIndicatorTrends);
-router.get('/trends/actors', analyticsController.getActorTrends);
-router.get('/distribution/types', analyticsController.getTypeDistribution);
-router.get('/heatmap/sources', analyticsController.getSourceHeatmap);
-router.get('/top/actors', analyticsController.getTopActors);
+// Top actors
+router.get('/top-actors', analyticsController.getTopActors);
+
+// Audit logs
+router.get('/audit-logs', analyticsController.getAuditLogs);
+
+// Campaign timeline
 router.get('/timeline/campaigns', analyticsController.getCampaignTimeline);
-router.get('/distribution/severity', analyticsController.getSeverityDistribution);
+
+// Type distribution
+router.get('/distribution/types', analyticsController.getTypeDistribution);
 
 module.exports = router;

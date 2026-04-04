@@ -1,19 +1,21 @@
-const db = require('../config/database');
+const Indicator = require('../models/Indicator');
+const ThreatActor = require('../models/ThreatActor');
+const Campaign = require('../models/Campaign');
 
 // Find campaigns associated with an indicator value
 exports.getCampaignsByIndicator = async (req, res) => {
   try {
-    const [campaigns] = await db.query(
-      `SELECT DISTINCT c.* 
-       FROM campaigns c
-       JOIN indicator_campaign ic ON c.campaign_id = ic.campaign_id
-       JOIN indicators i ON ic.indicator_id = i.indicator_id
-       WHERE i.value = ?
-       ORDER BY c.start_date DESC`,
-      [req.params.value]
-    );
-    
-    res.json(campaigns);
+    const indicators = await Indicator.find({ value: req.params.value })
+      .populate('campaigns')
+      .lean();
+
+    const campaignMap = new Map();
+    for (const ind of indicators) {
+      for (const c of (ind.campaigns || [])) {
+        if (c?._id) campaignMap.set(c._id.toString(), c);
+      }
+    }
+    res.json(Array.from(campaignMap.values()));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -22,42 +24,45 @@ exports.getCampaignsByIndicator = async (req, res) => {
 // Find actors using a specific indicator
 exports.getActorsByIndicator = async (req, res) => {
   try {
-    const [actors] = await db.query(
-      `SELECT DISTINCT a.* 
-       FROM threat_actors a
-       JOIN indicator_actor ia ON a.actor_id = ia.actor_id
-       JOIN indicators i ON ia.indicator_id = i.indicator_id
-       WHERE i.value = ?
-       ORDER BY a.last_seen DESC`,
-      [req.params.value]
-    );
-    
-    res.json(actors);
+    const indicators = await Indicator.find({ value: req.params.value })
+      .populate('actors')
+      .lean();
+
+    const actorMap = new Map();
+    for (const ind of indicators) {
+      for (const a of (ind.actors || [])) {
+        if (a?._id) actorMap.set(a._id.toString(), a);
+      }
+    }
+    res.json(Array.from(actorMap.values()));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
 
-// Find related indicators (common actors/campaigns)
+// Find related indicators (share same actors or campaigns)
 exports.getRelatedIndicators = async (req, res) => {
   try {
-    const [related] = await db.query(
-      `SELECT DISTINCT i2.*, 
-         COUNT(DISTINCT ia2.actor_id) as common_actors,
-         COUNT(DISTINCT ic2.campaign_id) as common_campaigns
-       FROM indicators i1
-       LEFT JOIN indicator_actor ia1 ON i1.indicator_id = ia1.indicator_id
-       LEFT JOIN indicator_campaign ic1 ON i1.indicator_id = ic1.indicator_id
-       JOIN indicator_actor ia2 ON ia1.actor_id = ia2.actor_id
-       JOIN indicator_campaign ic2 ON ic1.campaign_id = ic2.campaign_id
-       JOIN indicators i2 ON (ia2.indicator_id = i2.indicator_id OR ic2.indicator_id = i2.indicator_id)
-       WHERE i1.indicator_id = ? AND i2.indicator_id != ?
-       GROUP BY i2.indicator_id
-       ORDER BY common_actors DESC, common_campaigns DESC
-       LIMIT 20`,
-      [req.params.id, req.params.id]
-    );
-    
+    const indicator = await Indicator.findById(req.params.id).lean();
+    if (!indicator) return res.status(404).json({ error: 'Indicator not found' });
+
+    const relatedFilter = {
+      _id: { $ne: indicator._id },
+      $or: []
+    };
+
+    if (indicator.actors?.length > 0) {
+      relatedFilter.$or.push({ actors: { $in: indicator.actors } });
+    }
+    if (indicator.campaigns?.length > 0) {
+      relatedFilter.$or.push({ campaigns: { $in: indicator.campaigns } });
+    }
+
+    if (relatedFilter.$or.length === 0) {
+      return res.json([]);
+    }
+
+    const related = await Indicator.find(relatedFilter).limit(20).lean();
     res.json(related);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -67,28 +72,39 @@ exports.getRelatedIndicators = async (req, res) => {
 // Find actor overlap between campaigns
 exports.getActorOverlap = async (req, res) => {
   try {
-    const [overlap] = await db.query(
-      `SELECT 
-         c1.campaign_id as campaign1_id,
-         c1.name as campaign1_name,
-         c2.campaign_id as campaign2_id,
-         c2.name as campaign2_name,
-         COUNT(DISTINCT a.actor_id) as common_actors
-       FROM campaigns c1
-       JOIN indicator_campaign ic1 ON c1.campaign_id = ic1.campaign_id
-       JOIN indicator_actor ia ON ic1.indicator_id = ia.indicator_id
-       JOIN threat_actors a ON ia.actor_id = a.actor_id
-       JOIN indicator_actor ia2 ON a.actor_id = ia2.actor_id
-       JOIN indicator_campaign ic2 ON ia2.indicator_id = ic2.indicator_id
-       JOIN campaigns c2 ON ic2.campaign_id = c2.campaign_id
-       WHERE c1.campaign_id < c2.campaign_id
-       GROUP BY c1.campaign_id, c1.name, c2.campaign_id, c2.name
-       HAVING common_actors > 0
-       ORDER BY common_actors DESC
-       LIMIT 50`
-    );
-    
-    res.json(overlap);
+    // Get all campaigns and their actors via indicators
+    const campaigns = await Campaign.find().lean();
+    const campaignActors = new Map();
+
+    for (const campaign of campaigns) {
+      const actors = await Indicator.distinct('actors', { campaigns: campaign._id });
+      campaignActors.set(campaign._id.toString(), {
+        id: campaign._id,
+        name: campaign.name,
+        actors: actors.map(a => a.toString())
+      });
+    }
+
+    // Find overlapping actors between campaigns
+    const overlaps = [];
+    const entries = Array.from(campaignActors.values());
+
+    for (let i = 0; i < entries.length; i++) {
+      for (let j = i + 1; j < entries.length; j++) {
+        const common = entries[i].actors.filter(a => entries[j].actors.includes(a));
+        if (common.length > 0) {
+          overlaps.push({
+            campaign1_id: entries[i].id,
+            campaign1_name: entries[i].name,
+            campaign2_id: entries[j].id,
+            campaign2_name: entries[j].name,
+            common_actors: common.length
+          });
+        }
+      }
+    }
+
+    res.json(overlaps.sort((a, b) => b.common_actors - a.common_actors).slice(0, 50));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -97,62 +113,32 @@ exports.getActorOverlap = async (req, res) => {
 // Get complete threat context for an indicator
 exports.getThreatContext = async (req, res) => {
   try {
-    // Get indicator details
-    const [indicators] = await db.query(
-      'SELECT * FROM indicators WHERE indicator_id = ?',
-      [req.params.id]
-    );
-    
-    if (indicators.length === 0) {
-      return res.status(404).json({ error: 'Indicator not found' });
+    const indicator = await Indicator.findById(req.params.id)
+      .populate('actors')
+      .populate('campaigns')
+      .populate('sources')
+      .lean();
+
+    if (!indicator) return res.status(404).json({ error: 'Indicator not found' });
+
+    // Find related indicators
+    const relatedFilter = { _id: { $ne: indicator._id }, $or: [] };
+    if (indicator.actors?.length > 0) {
+      relatedFilter.$or.push({ actors: { $in: indicator.actors.map(a => a._id) } });
     }
-    
-    const indicator = indicators[0];
-    
-    // Get associated actors
-    const [actors] = await db.query(
-      `SELECT a.* FROM threat_actors a
-       JOIN indicator_actor ia ON a.actor_id = ia.actor_id
-       WHERE ia.indicator_id = ?`,
-      [req.params.id]
-    );
-    
-    // Get associated campaigns
-    const [campaigns] = await db.query(
-      `SELECT c.* FROM campaigns c
-       JOIN indicator_campaign ic ON c.campaign_id = ic.campaign_id
-       WHERE ic.indicator_id = ?`,
-      [req.params.id]
-    );
-    
-    // Get sources
-    const [sources] = await db.query(
-      `SELECT s.* FROM sources s
-       JOIN indicator_source isrc ON s.source_id = isrc.source_id
-       WHERE isrc.indicator_id = ?`,
-      [req.params.id]
-    );
-    
-    // Get related indicators
-    const [related] = await db.query(
-      `SELECT DISTINCT i2.indicator_id, i2.type, i2.value, i2.confidence_score
-       FROM indicators i1
-       LEFT JOIN indicator_actor ia1 ON i1.indicator_id = ia1.indicator_id
-       LEFT JOIN indicator_campaign ic1 ON i1.indicator_id = ic1.indicator_id
-       JOIN indicator_actor ia2 ON ia1.actor_id = ia2.actor_id
-       JOIN indicator_campaign ic2 ON ic1.campaign_id = ic2.campaign_id
-       JOIN indicators i2 ON (ia2.indicator_id = i2.indicator_id OR ic2.indicator_id = i2.indicator_id)
-       WHERE i1.indicator_id = ? AND i2.indicator_id != ?
-       GROUP BY i2.indicator_id
-       LIMIT 10`,
-      [req.params.id, req.params.id]
-    );
-    
+    if (indicator.campaigns?.length > 0) {
+      relatedFilter.$or.push({ campaigns: { $in: indicator.campaigns.map(c => c._id) } });
+    }
+
+    const related = relatedFilter.$or.length > 0
+      ? await Indicator.find(relatedFilter).limit(10).lean()
+      : [];
+
     res.json({
       indicator,
-      actors,
-      campaigns,
-      sources,
+      actors: indicator.actors || [],
+      campaigns: indicator.campaigns || [],
+      sources: indicator.sources || [],
       related_indicators: related
     });
   } catch (error) {

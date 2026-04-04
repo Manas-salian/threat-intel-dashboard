@@ -1,9 +1,10 @@
-const db = require('../config/database');
+const Source = require('../models/Source');
+const Indicator = require('../models/Indicator');
 
 // Get all sources
 exports.getAll = async (req, res) => {
   try {
-    const [sources] = await db.query('SELECT * FROM sources ORDER BY name');
+    const sources = await Source.find().sort({ name: 1 }).lean();
     res.json(sources);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -13,16 +14,9 @@ exports.getAll = async (req, res) => {
 // Get single source by ID
 exports.getById = async (req, res) => {
   try {
-    const [sources] = await db.query(
-      'SELECT * FROM sources WHERE source_id = ?',
-      [req.params.id]
-    );
-    
-    if (sources.length === 0) {
-      return res.status(404).json({ error: 'Source not found' });
-    }
-    
-    res.json(sources[0]);
+    const source = await Source.findById(req.params.id).lean();
+    if (!source) return res.status(404).json({ error: 'Source not found' });
+    res.json(source);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -31,16 +25,11 @@ exports.getById = async (req, res) => {
 // Create new source
 exports.create = async (req, res) => {
   try {
-    const { name, url, update_rate, auth_type } = req.body;
-    
-    const [result] = await db.query(
-      `INSERT INTO sources (name, url, update_rate, auth_type) 
-       VALUES (?, ?, ?, ?)`,
-      [name, url, update_rate, auth_type]
-    );
-    
+    const { name, url, reliability_score } = req.body;
+    const source = await Source.create({ name, url, reliability_score });
+
     res.status(201).json({
-      source_id: result.insertId,
+      _id: source._id,
       message: 'Source created successfully'
     });
   } catch (error) {
@@ -51,19 +40,15 @@ exports.create = async (req, res) => {
 // Update source
 exports.update = async (req, res) => {
   try {
-    const { name, url, update_rate, auth_type } = req.body;
-    
-    const [result] = await db.query(
-      `UPDATE sources 
-       SET name = ?, url = ?, update_rate = ?, auth_type = ?
-       WHERE source_id = ?`,
-      [name, url, update_rate, auth_type, req.params.id]
+    const { name, url, reliability_score } = req.body;
+
+    const source = await Source.findByIdAndUpdate(
+      req.params.id,
+      { name, url, reliability_score },
+      { new: true, runValidators: true }
     );
-    
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Source not found' });
-    }
-    
+
+    if (!source) return res.status(404).json({ error: 'Source not found' });
     res.json({ message: 'Source updated successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -73,19 +58,15 @@ exports.update = async (req, res) => {
 // Delete source
 exports.delete = async (req, res) => {
   try {
-    // Delete relationships first
-    await db.query('DELETE FROM indicator_source WHERE source_id = ?', [req.params.id]);
-    
-    // Delete source
-    const [result] = await db.query(
-      'DELETE FROM sources WHERE source_id = ?',
-      [req.params.id]
+    const source = await Source.findByIdAndDelete(req.params.id);
+    if (!source) return res.status(404).json({ error: 'Source not found' });
+
+    // Remove source references from indicators
+    await Indicator.updateMany(
+      { sources: req.params.id },
+      { $pull: { sources: req.params.id } }
     );
-    
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Source not found' });
-    }
-    
+
     res.json({ message: 'Source deleted successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -95,14 +76,9 @@ exports.delete = async (req, res) => {
 // Get indicators from a source
 exports.getIndicators = async (req, res) => {
   try {
-    const [indicators] = await db.query(
-      `SELECT i.* FROM indicators i
-       JOIN indicator_source isrc ON i.indicator_id = isrc.indicator_id
-       WHERE isrc.source_id = ?
-       ORDER BY i.last_seen DESC`,
-      [req.params.id]
-    );
-    
+    const indicators = await Indicator.find({ sources: req.params.id })
+      .sort({ last_seen: -1 })
+      .lean();
     res.json(indicators);
   } catch (error) {
     res.status(500).json({ error: error.message });

@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, Navigate, useLocation } from 'react-router-dom';
 import { Home, Shield, Users, Target, Database, BarChart3, Upload, Search, Settings, Sun, Moon, Globe } from 'lucide-react';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 import Dashboard from './pages/Dashboard';
@@ -39,7 +39,7 @@ function Layout() {
         </div>
 
         <ul className="nav-menu">
-          {/* <NavLink to="/" icon={Home} label="Dashboard" /> */}
+          <NavLink to="/" icon={Home} label="Dashboard" />
           <NavLink to="/explorer" icon={Globe} label="Data Explorer" />
 
           <li className="nav-section">Analysis</li>
@@ -67,7 +67,7 @@ function Layout() {
 
       <main className="main-content">
         <Routes>
-          {/* <Route path="/" element={<Dashboard />} /> */}
+          <Route path="/" element={<Dashboard />} />
           <Route path="/explorer" element={<DataExplorer />} />
           <Route path="/check" element={<ThreatCheck />} />
           <Route path="/indicators" element={<Indicators />} />
@@ -77,6 +77,7 @@ function Layout() {
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/ingestion" element={<Ingestion />} />
           <Route path="/admin" element={<Admin />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
     </div>

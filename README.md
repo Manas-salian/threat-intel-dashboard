@@ -1,238 +1,188 @@
-# Threat Intelligence Management System
+# Threat Intelligence Dashboard
 
-A comprehensive system for managing, correlating, and analyzing threat intelligence data from multiple sources.
+A comprehensive system for managing, correlating, and analyzing threat intelligence data from multiple sources. Built with Express.js, MongoDB, and React.
 
-## 🗂️ Project Structure
+## Project Structure
 
 ```
 backend/
 ├── config/
-│   └── database.js          # MySQL database configuration
+│   └── database.js          # MongoDB/Mongoose connection
+├── models/
+│   ├── Indicator.js          # Indicator schema
+│   ├── ThreatActor.js        # Threat actor schema
+│   ├── Campaign.js           # Campaign schema
+│   ├── Source.js              # Data source schema
+│   └── AuditLog.js           # Audit log schema
 ├── controllers/
-│   ├── actorController.js   # Threat actor operations
-│   ├── analyticsController.js  # Analytics and reporting
-│   ├── campaignController.js   # Campaign management
-│   ├── correlationController.js # Cross-entity correlation
-│   ├── indicatorController.js  # Indicator management
-│   ├── ingestController.js     # Data ingestion
-│   └── sourceController.js     # Source management
+│   ├── indicatorController.js
+│   ├── actorController.js
+│   ├── analyticsController.js
+│   ├── campaignController.js
+│   ├── correlationController.js
+│   ├── ingestController.js
+│   └── sourceController.js
 ├── routes/
-│   └── [entity].js          # API route definitions
-├── scripts/
-│   ├── schema.sql           # Database schema
-│   ├── seed_data.sql        # Sample data
-│   ├── analytics_queries.sql # Useful queries
-│   └── ingest.js            # Ingestion script
+│   ├── indicators.js
+│   ├── actors.js
+│   ├── analytics.js
+│   ├── campaigns.js
+│   ├── correlations.js
+│   ├── ingest.js
+│   ├── sources.js
+│   └── tools.js
 ├── services/
-│   └── ingestionService.js  # Data ingestion logic
+│   └── ingestionService.js   # AlienVault, AbuseIPDB, VirusTotal ingestion
+├── scripts/
+│   └── seed.js               # Database seed script
 ├── package.json
-└── server.js                # Express server entry point
+└── server.js
+
+frontend/
+├── src/
+│   ├── pages/                # React page components
+│   ├── services/api.js       # API client
+│   ├── context/              # React context (theme)
+│   ├── App.jsx               # Router + layout
+│   └── main.jsx              # Entry point
+├── package.json
+└── vite.config.js
 ```
 
-## 📋 Prerequisites
+## Prerequisites
 
-- Node.js (v14 or higher)
-- MySQL (v5.7 or higher)
-- npm or yarn
+- Node.js (v18 or higher)
+- MongoDB (v6 or higher)
+- npm
 
-## 🚀 Setup Instructions
+## Setup (Linux / macOS)
 
-### 1. Database Configuration
-
-1. **Create the database:**
+### 1. Start MongoDB
 ```bash
-sudo mysql
+# If using systemd
+sudo systemctl start mongod
+
+# Or if using mongosh
+mongosh
 ```
 
-```sql
-CREATE DATABASE threat_intelligence;
-exit;
-```
-
-2. **Run the schema:**
-```bash
-sudo mysql threat_intelligence < backend/scripts/schema.sql
-```
-
-3. **Load sample data:**
-```bash
-sudo mysql threat_intelligence < backend/scripts/seed_data.sql
-```
-
-4. **Update database credentials:**
-Edit `backend/config/database.js` and set your MySQL credentials:
-```javascript
-host: 'localhost',
-user: 'root',           // Your MySQL username
-password: 'your_password',  // Your MySQL password
-database: 'threat_intelligence'
-```
-
-### 2. Install Dependencies
-
+### 2. Install & Run Backend
 ```bash
 cd backend
+cp .env.example .env    # Edit with your settings
 npm install
+node scripts/seed.js    # Load sample data
+npm start               # Starts on http://localhost:5000
 ```
 
-### 3. Start the Backend Server
-
+### 3. Install & Run Frontend
 ```bash
-npm start
+cd frontend
+npm install
+npm run dev             # Starts Vite dev server
 ```
 
-The server will start on `http://localhost:5000`
+## Setup (Windows)
 
-## 📡 API Endpoints
+### 1. Install MongoDB
+1. Download the MongoDB Community Server MSI installer from [mongodb.com/try/download/community](https://www.mongodb.com/try/download/community)
+2. Run the installer — select **Complete** setup and check **Install MongoDB as a Service**
+3. Optionally install MongoDB Compass (GUI) when prompted
+4. MongoDB will start automatically as a Windows service. To verify:
+```powershell
+# Check service status
+Get-Service MongoDB
+
+# Or start manually if needed
+net start MongoDB
+```
+
+### 2. Install & Run Backend
+```powershell
+cd backend
+copy .env.example .env      # Edit with your settings (use notepad .env)
+npm install
+node scripts/seed.js        # Load sample data
+npm start                   # Starts on http://localhost:5000
+```
+
+### 3. Install & Run Frontend
+```powershell
+cd frontend
+npm install
+npm run dev                 # Starts Vite dev server
+```
+
+> **Note:** If you installed MongoDB with a custom path or authentication, update `MONGODB_URI` in `backend/.env` accordingly (e.g., `mongodb://user:pass@localhost:27017/threat_intelligence`).
+
+## API Endpoints
 
 ### Indicators
-- `GET /api/indicators` - Get all indicators
-- `GET /api/indicators/:id` - Get indicator by ID
-- `POST /api/indicators` - Create new indicator
-- `PUT /api/indicators/:id` - Update indicator
-- `DELETE /api/indicators/:id` - Delete indicator
-- `GET /api/indicators/type/:type` - Get indicators by type
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/indicators` | List all (pagination: `?page=1&limit=50&type=IPv4&search=...`) |
+| GET | `/api/indicators/:id` | Get by ID (populated with sources/actors/campaigns) |
+| POST | `/api/indicators` | Create new |
+| PUT | `/api/indicators/:id` | Update |
+| DELETE | `/api/indicators/:id` | Delete |
+| POST | `/api/indicators/bulk` | Bulk ingest |
 
 ### Threat Actors
-- `GET /api/actors` - Get all threat actors
-- `GET /api/actors/:id` - Get actor by ID
-- `POST /api/actors` - Create new actor
-- `PUT /api/actors/:id` - Update actor
-- `DELETE /api/actors/:id` - Delete actor
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/actors` | List all |
+| GET | `/api/actors/:id` | Get by ID |
+| POST | `/api/actors` | Create |
+| PUT | `/api/actors/:id` | Update |
+| DELETE | `/api/actors/:id` | Delete |
 
 ### Campaigns
-- `GET /api/campaigns` - Get all campaigns
-- `GET /api/campaigns/:id` - Get campaign by ID
-- `POST /api/campaigns` - Create new campaign
-- `PUT /api/campaigns/:id` - Update campaign
-- `DELETE /api/campaigns/:id` - Delete campaign
-- `GET /api/campaigns/active` - Get active campaigns
-
-### Sources
-- `GET /api/sources` - Get all sources
-- `GET /api/sources/:id` - Get source by ID
-- `POST /api/sources` - Create new source
-- `PUT /api/sources/:id` - Update source
-- `DELETE /api/sources/:id` - Delete source
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/campaigns` | List all |
+| GET | `/api/campaigns/active` | Active campaigns |
+| GET | `/api/campaigns/severity/:severity` | Filter by severity |
+| POST | `/api/campaigns` | Create |
+| PUT | `/api/campaigns/:id` | Update |
+| DELETE | `/api/campaigns/:id` | Delete |
 
 ### Analytics
-- `GET /api/analytics/dashboard` - Get dashboard statistics
-- `GET /api/analytics/indicators/timeline` - Get indicator timeline
-- `GET /api/analytics/actors/activity` - Get actor activity
-- `GET /api/analytics/campaigns/severity` - Get campaign severity distribution
-- `GET /api/analytics/sources/reliability` - Get source reliability metrics
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/analytics/dashboard` | Dashboard overview stats |
+| GET | `/api/analytics/indicators/timeline` | Indicator trends |
+| GET | `/api/analytics/actors/activity` | Actor activity |
+| GET | `/api/analytics/campaigns/severity` | Severity distribution |
+| GET | `/api/analytics/sources/reliability` | Source reliability |
+| GET | `/api/analytics/top-actors` | Top actors by indicator count |
+| GET | `/api/analytics/audit-logs` | Audit logs |
 
-### Correlations
-- `GET /api/correlations/indicator/:id` - Get all correlations for an indicator
-- `GET /api/correlations/campaign/:id/actors` - Get actors in a campaign
-- `GET /api/correlations/actor/:id/campaigns` - Get campaigns by actor
-- `POST /api/correlations/link` - Link entities (indicator-actor, indicator-campaign, etc.)
+### Ingestion
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/ingest/run` | Run all ingestion sources |
+| POST | `/api/ingest/run/:source` | Run specific source (`alienvault`, `abuseipdb`, `virustotal`) |
+| GET | `/api/ingest/status` | Ingestion status |
 
-### Data Ingestion
-- `POST /api/ingest/indicators` - Ingest indicators in bulk
-- `POST /api/ingest/external` - Ingest from external feed
-- `GET /api/ingest/status` - Get ingestion status
+### Tools
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/tools/check` | Check if an indicator exists in the database |
 
-## 🔍 Sample API Requests
+## Environment Variables
 
-### Create an Indicator
-```bash
-curl -X POST http://localhost:5000/api/indicators \
-  -H "Content-Type: application/json" \
-  -d '{
-    "type": "IPv4",
-    "value": "10.0.0.1",
-    "first_seen": "2025-10-03T10:00:00",
-    "last_seen": "2025-10-03T12:00:00",
-    "confidence_score": 0.85,
-    "description": "Suspicious C2 server"
-  }'
-```
-
-### Get Dashboard Analytics
-```bash
-curl http://localhost:5000/api/analytics/dashboard
-```
-
-### Link Indicator to Actor
-```bash
-curl -X POST http://localhost:5000/api/correlations/link \
-  -H "Content-Type: application/json" \
-  -d '{
-    "indicatorId": 1,
-    "actorId": 2
-  }'
-```
-
-## 🔄 Data Ingestion
-
-### Manual Ingestion
-Run the ingestion script to fetch data from external sources:
-```bash
-node backend/scripts/ingest.js
-```
-
-### Bulk Ingestion via API
-```bash
-curl -X POST http://localhost:5000/api/ingest/indicators \
-  -H "Content-Type: application/json" \
-  -d '{
-    "indicators": [
-      {
-        "type": "domain",
-        "value": "malicious.com",
-        "confidence_score": 0.90,
-        "description": "Phishing domain"
-      }
-    ],
-    "sourceId": 1
-  }'
-```
-
-## 📊 Database Queries
-
-Useful analytics queries are provided in `backend/scripts/analytics_queries.sql`. Examples:
-
-- Find all campaigns for an indicator
-- Get indicators by threat actor
-- View indicator timeline
-- Identify cross-campaign indicators
-- Analyze MITRE ATT&CK tactic distribution
-
-## 🔧 Configuration
-
-### Environment Variables (Optional)
-Create a `.env` file in the backend directory:
-```
+```env
+MONGODB_URI=mongodb://localhost:27017/threat_intelligence
 PORT=5000
-DB_HOST=localhost
-DB_USER=root
-DB_PASSWORD=your_password
-DB_NAME=threat_intelligence
+NODE_ENV=development
+
+ALIENVAULT_API_KEY=your_key_here
+ABUSEIPDB_API_KEY=your_key_here
+VIRUSTOTAL_API_KEY=your_key_here
+
+MAX_INDICATORS_PER_FEED=1000
 ```
 
-Update `config/database.js` to use environment variables if needed.
-
-## 📈 Next Steps
-
-1. **Frontend Development**: Create a React frontend to visualize the data
-2. **Real-time Feeds**: Integrate with AlienVault OTX, VirusTotal, etc.
-3. **Authentication**: Add JWT-based authentication
-4. **Export Features**: STIX 2.1 export capability
-5. **Alerting**: Set up threshold-based alerts
-6. **Visualization**: Graph-based relationship visualization
-
-## 🛠️ Troubleshooting
-
-### Database Connection Issues
-- Ensure MySQL is running: `sudo systemctl status mysql`
-- Check credentials in `config/database.js`
-- Verify database exists: `sudo mysql -e "SHOW DATABASES;"`
-
-### Port Already in Use
-- Change the port in `server.js` (default: 5000)
-- Or kill the process using the port: `sudo lsof -ti:5000 | xargs kill -9`
-
-## 📝 License
+## License
 
 MIT License

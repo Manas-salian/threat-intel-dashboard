@@ -1,65 +1,25 @@
-const db = require('../config/database');
+const Campaign = require('../models/Campaign');
+const Indicator = require('../models/Indicator');
 
 // Get all campaigns
 exports.getAll = async (req, res) => {
   try {
     const { page = 1, limit = 50, severity, search } = req.query;
-    const offset = (page - 1) * limit;
+    const skip = (page - 1) * limit;
 
-    let query = `
-        SELECT c.*, s.level as severity_level 
-        FROM campaigns c
-        LEFT JOIN severities s ON c.severity_id = s.severity_id
-        WHERE 1=1
-    `;
-    const params = [];
-
-    if (severity) {
-      // severity can be ID or Level Name
-      if (isNaN(severity)) {
-        query += ' AND s.level = ?';
-        params.push(severity);
-      } else {
-        query += ' AND c.severity_id = ?';
-        params.push(severity);
-      }
-    }
-
+    const filter = {};
+    if (severity) filter.severity = severity;
     if (search) {
-      query += ' AND (c.name LIKE ? OR c.description LIKE ?)';
-      params.push(`%${search}%`, `%${search}%`);
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } }
+      ];
     }
 
-    query += ' ORDER BY c.start_date DESC LIMIT ? OFFSET ?';
-    params.push(parseInt(limit), offset);
-
-    const [campaigns] = await db.query(query, params);
-
-    // Get total count
-    let countQuery = `
-        SELECT COUNT(*) as total 
-        FROM campaigns c
-        LEFT JOIN severities s ON c.severity_id = s.severity_id
-        WHERE 1=1
-    `;
-    const countParams = [];
-
-    if (severity) {
-      if (isNaN(severity)) {
-        countQuery += ' AND s.level = ?';
-        countParams.push(severity);
-      } else {
-        countQuery += ' AND c.severity_id = ?';
-        countParams.push(severity);
-      }
-    }
-    if (search) {
-      countQuery += ' AND (c.name LIKE ? OR c.description LIKE ?)';
-      countParams.push(`%${search}%`, `%${search}%`);
-    }
-
-    const [countResult] = await db.query(countQuery, countParams);
-    const total = countResult[0].total;
+    const [campaigns, total] = await Promise.all([
+      Campaign.find(filter).sort({ start_date: -1 }).skip(skip).limit(parseInt(limit)).lean(),
+      Campaign.countDocuments(filter)
+    ]);
 
     res.json({
       campaigns,
@@ -78,19 +38,9 @@ exports.getAll = async (req, res) => {
 // Get single campaign by ID
 exports.getById = async (req, res) => {
   try {
-    const [campaigns] = await db.query(
-      `SELECT c.*, s.level as severity_level 
-       FROM campaigns c
-       LEFT JOIN severities s ON c.severity_id = s.severity_id
-       WHERE c.campaign_id = ?`,
-      [req.params.id]
-    );
-
-    if (campaigns.length === 0) {
-      return res.status(404).json({ error: 'Campaign not found' });
-    }
-
-    res.json(campaigns[0]);
+    const campaign = await Campaign.findById(req.params.id).lean();
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+    res.json(campaign);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -99,16 +49,14 @@ exports.getById = async (req, res) => {
 // Create new campaign
 exports.create = async (req, res) => {
   try {
-    const { name, start_date, end_date, description, severity_id } = req.body;
+    const { name, start_date, end_date, description, severity } = req.body;
 
-    const [result] = await db.query(
-      `INSERT INTO campaigns (name, start_date, end_date, description, severity_id) 
-       VALUES (?, ?, ?, ?, ?)`,
-      [name, start_date, end_date, description, severity_id]
-    );
+    const campaign = await Campaign.create({
+      name, start_date, end_date, description, severity
+    });
 
     res.status(201).json({
-      campaign_id: result.insertId,
+      _id: campaign._id,
       message: 'Campaign created successfully'
     });
   } catch (error) {
@@ -119,19 +67,15 @@ exports.create = async (req, res) => {
 // Update campaign
 exports.update = async (req, res) => {
   try {
-    const { name, start_date, end_date, description, severity_id } = req.body;
+    const { name, start_date, end_date, description, severity } = req.body;
 
-    const [result] = await db.query(
-      `UPDATE campaigns 
-       SET name = ?, start_date = ?, end_date = ?, description = ?, severity_id = ?
-       WHERE campaign_id = ?`,
-      [name, start_date, end_date, description, severity_id, req.params.id]
+    const campaign = await Campaign.findByIdAndUpdate(
+      req.params.id,
+      { name, start_date, end_date, description, severity },
+      { new: true, runValidators: true }
     );
 
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Campaign not found' });
-    }
-
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
     res.json({ message: 'Campaign updated successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -141,15 +85,14 @@ exports.update = async (req, res) => {
 // Delete campaign
 exports.delete = async (req, res) => {
   try {
-    // Cascade delete handles relationships
-    const [result] = await db.query(
-      'DELETE FROM campaigns WHERE campaign_id = ?',
-      [req.params.id]
-    );
+    const campaign = await Campaign.findByIdAndDelete(req.params.id);
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
 
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Campaign not found' });
-    }
+    // Remove campaign references from indicators
+    await Indicator.updateMany(
+      { campaigns: req.params.id },
+      { $pull: { campaigns: req.params.id } }
+    );
 
     res.json({ message: 'Campaign deleted successfully' });
   } catch (error) {
@@ -160,16 +103,9 @@ exports.delete = async (req, res) => {
 // Get indicators in a campaign
 exports.getIndicators = async (req, res) => {
   try {
-    const [indicators] = await db.query(
-      `SELECT i.*, it.name as type_name 
-       FROM indicators i
-       JOIN indicator_types it ON i.type_id = it.type_id
-       JOIN indicator_campaign ic ON i.indicator_id = ic.indicator_id
-       WHERE ic.campaign_id = ?
-       ORDER BY i.last_seen DESC`,
-      [req.params.id]
-    );
-
+    const indicators = await Indicator.find({ campaigns: req.params.id })
+      .sort({ last_seen: -1 })
+      .lean();
     res.json(indicators);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -179,26 +115,9 @@ exports.getIndicators = async (req, res) => {
 // Get campaigns by severity
 exports.getBySeverity = async (req, res) => {
   try {
-    const { severity } = req.params;
-    let query = `
-        SELECT c.*, s.level as severity_level 
-        FROM campaigns c
-        LEFT JOIN severities s ON c.severity_id = s.severity_id
-    `;
-    const params = [];
-
-    if (isNaN(severity)) {
-      query += ' WHERE s.level = ?';
-      params.push(severity);
-    } else {
-      query += ' WHERE c.severity_id = ?';
-      params.push(severity);
-    }
-
-    query += ' ORDER BY c.start_date DESC';
-
-    const [campaigns] = await db.query(query, params);
-
+    const campaigns = await Campaign.find({ severity: req.params.severity })
+      .sort({ start_date: -1 })
+      .lean();
     res.json(campaigns);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -208,14 +127,14 @@ exports.getBySeverity = async (req, res) => {
 // Get active campaigns
 exports.getActive = async (req, res) => {
   try {
-    const [campaigns] = await db.query(
-      `SELECT c.*, s.level as severity_level 
-       FROM campaigns c
-       LEFT JOIN severities s ON c.severity_id = s.severity_id
-       WHERE c.start_date <= CURDATE() 
-       AND (c.end_date IS NULL OR c.end_date >= CURDATE())
-       ORDER BY c.start_date DESC`
-    );
+    const now = new Date();
+    const campaigns = await Campaign.find({
+      start_date: { $lte: now },
+      $or: [
+        { end_date: null },
+        { end_date: { $gte: now } }
+      ]
+    }).sort({ start_date: -1 }).lean();
 
     res.json(campaigns);
   } catch (error) {

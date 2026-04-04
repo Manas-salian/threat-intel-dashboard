@@ -1,104 +1,92 @@
-const db = require('../config/database');
+const Indicator = require('../models/Indicator');
+const ThreatActor = require('../models/ThreatActor');
+const Campaign = require('../models/Campaign');
+const Source = require('../models/Source');
+const AuditLog = require('../models/AuditLog');
 
 // Dashboard overview
 exports.getDashboard = async (req, res) => {
   try {
-    // Total counts
-    const [indicatorCount] = await db.query('SELECT COUNT(*) as count FROM indicators');
-    const [actorCount] = await db.query('SELECT COUNT(*) as count FROM threat_actors');
-    const [campaignCount] = await db.query('SELECT COUNT(*) as count FROM campaigns');
-    const [sourceCount] = await db.query('SELECT COUNT(*) as count FROM sources');
-    
-    // New indicators today
-    const [newToday] = await db.query(
-      `SELECT COUNT(*) as count FROM indicators 
-       WHERE DATE(first_seen) = CURDATE()`
-    );
-    
-    // Active actors (with activity in last 30 days)
-    const [activeActors] = await db.query(
-      `SELECT COUNT(*) as count FROM threat_actors 
-       WHERE last_activity >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)`
-    );
-    
-    // Active campaigns
-    const [activeCampaigns] = await db.query(
-      `SELECT COUNT(*) as count FROM campaigns 
-       WHERE start_date <= CURDATE() 
-       AND (end_date IS NULL OR end_date >= CURDATE())`
-    );
-    
-    // Critical campaigns
-    const [criticalCampaigns] = await db.query(
-      `SELECT COUNT(*) as count FROM campaigns c
-       JOIN severities s ON c.severity_id = s.severity_id
-       WHERE s.level = 'critical'`
-    );
-    
-    // Recent high-confidence indicators
-    const [recentIndicators] = await db.query(
-      `SELECT * FROM indicators 
-       WHERE confidence_score >= 0.7
-       ORDER BY last_seen DESC 
-       LIMIT 10`
-    );
-    
-    // Indicator type distribution
-    const [indicatorTypes] = await db.query(
-      `SELECT it.name as type, COUNT(*) as count 
-       FROM indicators i
-       JOIN indicator_types it ON i.type_id = it.type_id
-       GROUP BY it.name 
-       ORDER BY count DESC`
-    );
-    
-    // Campaign severity distribution
-    const [campaignSeverity] = await db.query(
-      `SELECT s.level as severity, COUNT(*) as count 
-       FROM campaigns c
-       JOIN severities s ON c.severity_id = s.severity_id
-       GROUP BY s.level 
-       ORDER BY 
-         CASE s.level
-           WHEN 'critical' THEN 1
-           WHEN 'high' THEN 2
-           WHEN 'medium' THEN 3
-           WHEN 'low' THEN 4
-         END`
-    );
-    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const [
+      totalIndicators,
+      totalActors,
+      totalCampaigns,
+      totalSources,
+      newIndicatorsToday,
+      activeActors,
+      activeCampaigns,
+      criticalCampaigns,
+      recentIndicators,
+      indicatorTypes,
+      campaignSeverity
+    ] = await Promise.all([
+      Indicator.countDocuments(),
+      ThreatActor.countDocuments(),
+      Campaign.countDocuments(),
+      Source.countDocuments(),
+      Indicator.countDocuments({ first_seen: { $gte: today } }),
+      ThreatActor.countDocuments({ last_seen: { $gte: thirtyDaysAgo } }),
+      Campaign.countDocuments({
+        start_date: { $lte: new Date() },
+        $or: [{ end_date: null }, { end_date: { $gte: new Date() } }]
+      }),
+      Campaign.countDocuments({ severity: 'critical' }),
+      Indicator.find({ confidence_score: { $gte: 0.7 } })
+        .sort({ last_seen: -1 })
+        .limit(10)
+        .lean(),
+      Indicator.aggregate([
+        { $group: { _id: '$type', count: { $sum: 1 } } },
+        { $project: { type: '$_id', count: 1, _id: 0 } },
+        { $sort: { count: -1 } }
+      ]),
+      Campaign.aggregate([
+        { $group: { _id: '$severity', count: { $sum: 1 } } },
+        { $project: { severity: '$_id', count: 1, _id: 0 } },
+        { $sort: { count: -1 } }
+      ])
+    ]);
+
     res.json({
-      totalIndicators: indicatorCount[0].count,
-      totalActors: actorCount[0].count,
-      totalCampaigns: campaignCount[0].count,
-      totalSources: sourceCount[0].count,
-      newIndicatorsToday: newToday[0].count,
-      activeActors: activeActors[0].count,
-      activeCampaigns: activeCampaigns[0].count,
-      criticalCampaigns: criticalCampaigns[0].count,
-      recentIndicators: recentIndicators,
-      indicatorTypes: indicatorTypes,
-      campaignSeverity: campaignSeverity
+      totalIndicators,
+      totalActors,
+      totalCampaigns,
+      totalSources,
+      newIndicatorsToday,
+      activeActors,
+      activeCampaigns,
+      criticalCampaigns,
+      recentIndicators,
+      indicatorTypes,
+      campaignSeverity
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
 
-// Trend data - new indicators over time
+// Trend data — new indicators over time
 exports.getIndicatorTrends = async (req, res) => {
   try {
     const { days = 30 } = req.query;
-    
-    const [trends] = await db.query(
-      `SELECT DATE(first_seen) as date, COUNT(*) as count 
-       FROM indicators 
-       WHERE first_seen >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
-       GROUP BY DATE(first_seen)
-       ORDER BY date`,
-      [days]
-    );
-    
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    const trends = await Indicator.aggregate([
+      { $match: { first_seen: { $gte: since } } },
+      {
+        $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$first_seen' } },
+          count: { $sum: 1 }
+        }
+      },
+      { $project: { date: '$_id', count: 1, _id: 0 } },
+      { $sort: { date: 1 } }
+    ]);
+
     res.json(trends);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -108,21 +96,26 @@ exports.getIndicatorTrends = async (req, res) => {
 // Actor activity trends
 exports.getActorTrends = async (req, res) => {
   try {
-    const [activity] = await db.query(
-      `SELECT 
-         a.actor_id,
-         a.name,
-         a.last_seen as last_activity,
-         COUNT(ia.indicator_id) as indicator_count
-       FROM threat_actors a
-       LEFT JOIN indicator_actor ia ON a.actor_id = ia.actor_id
-       GROUP BY a.actor_id, a.name, a.last_seen
-       HAVING indicator_count > 0
-       ORDER BY indicator_count DESC
-       LIMIT 10`
+    const actors = await ThreatActor.find()
+      .sort({ last_seen: -1 })
+      .limit(10)
+      .lean();
+
+    // Count indicators per actor
+    const result = await Promise.all(
+      actors.map(async (actor) => {
+        const indicator_count = await Indicator.countDocuments({ actors: actor._id });
+        return {
+          _id: actor._id,
+          name: actor.name,
+          last_activity: actor.last_seen,
+          indicator_count
+        };
+      })
     );
-    
-    res.json(activity);
+
+    // Sort by indicator count desc and filter out zeros
+    res.json(result.filter(a => a.indicator_count > 0).sort((a, b) => b.indicator_count - a.indicator_count));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -131,14 +124,11 @@ exports.getActorTrends = async (req, res) => {
 // Indicator type distribution
 exports.getTypeDistribution = async (req, res) => {
   try {
-    const [distribution] = await db.query(
-      `SELECT it.name as type, COUNT(*) as count 
-       FROM indicators i
-       JOIN indicator_types it ON i.type_id = it.type_id
-       GROUP BY it.name 
-       ORDER BY count DESC`
-    );
-    
+    const distribution = await Indicator.aggregate([
+      { $group: { _id: '$type', count: { $sum: 1 } } },
+      { $project: { type: '$_id', count: 1, _id: 0 } },
+      { $sort: { count: -1 } }
+    ]);
     res.json(distribution);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -148,20 +138,27 @@ exports.getTypeDistribution = async (req, res) => {
 // Source reliability heatmap
 exports.getSourceHeatmap = async (req, res) => {
   try {
-    const [heatmap] = await db.query(
-      `SELECT 
-         s.name as source,
-         COUNT(i.indicator_id) as total_indicators,
-         AVG(i.confidence_score) as avg_confidence,
-         SUM(CASE WHEN i.confidence_score >= 0.8 THEN 1 ELSE 0 END) as high_confidence_count
-       FROM sources s
-       LEFT JOIN indicator_source isrc ON s.source_id = isrc.source_id
-       LEFT JOIN indicators i ON isrc.indicator_id = i.indicator_id
-       GROUP BY s.source_id, s.name
-       ORDER BY avg_confidence DESC`
+    const sources = await Source.find().lean();
+
+    const result = await Promise.all(
+      sources.map(async (source) => {
+        const indicators = await Indicator.find({ sources: source._id }).lean();
+        const totalIndicators = indicators.length;
+        const avgConfidence = totalIndicators > 0
+          ? indicators.reduce((sum, i) => sum + (i.confidence_score || 0), 0) / totalIndicators
+          : 0;
+        const highConfidenceCount = indicators.filter(i => i.confidence_score >= 0.8).length;
+
+        return {
+          source: source.name,
+          total_indicators: totalIndicators,
+          avg_confidence: avgConfidence,
+          high_confidence_count: highConfidenceCount
+        };
+      })
     );
-    
-    res.json(heatmap);
+
+    res.json(result.sort((a, b) => b.avg_confidence - a.avg_confidence));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -171,24 +168,28 @@ exports.getSourceHeatmap = async (req, res) => {
 exports.getTopActors = async (req, res) => {
   try {
     const { limit = 10 } = req.query;
-    
-    const [topActors] = await db.query(
-      `SELECT 
-         a.actor_id,
-         a.name,
-         a.description,
-         COUNT(ia.indicator_id) as indicator_count,
-         MAX(i.last_seen) as most_recent_activity
-       FROM threat_actors a
-       LEFT JOIN indicator_actor ia ON a.actor_id = ia.actor_id
-       LEFT JOIN indicators i ON ia.indicator_id = i.indicator_id
-       GROUP BY a.actor_id, a.name, a.description
-       ORDER BY indicator_count DESC
-       LIMIT ?`,
-      [parseInt(limit)]
+    const actors = await ThreatActor.find().lean();
+
+    const result = await Promise.all(
+      actors.map(async (actor) => {
+        const indicator_count = await Indicator.countDocuments({ actors: actor._id });
+        const mostRecent = await Indicator.findOne({ actors: actor._id })
+          .sort({ last_seen: -1 }).lean();
+        return {
+          _id: actor._id,
+          name: actor.name,
+          description: actor.description,
+          indicator_count,
+          most_recent_activity: mostRecent?.last_seen || null
+        };
+      })
     );
-    
-    res.json(topActors);
+
+    res.json(
+      result
+        .sort((a, b) => b.indicator_count - a.indicator_count)
+        .slice(0, parseInt(limit))
+    );
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -197,19 +198,21 @@ exports.getTopActors = async (req, res) => {
 // Campaign timeline
 exports.getCampaignTimeline = async (req, res) => {
   try {
-    const [timeline] = await db.query(
-      `SELECT 
-         c.campaign_id,
-         c.name,
-         c.start_date,
-         c.end_date,
-         s.level as severity,
-         DATEDIFF(COALESCE(c.end_date, CURDATE()), c.start_date) as duration_days
-       FROM campaigns c
-       LEFT JOIN severities s ON c.severity_id = s.severity_id
-       ORDER BY c.start_date DESC`
-    );
-    
+    const campaigns = await Campaign.find().sort({ start_date: -1 }).lean();
+
+    const timeline = campaigns.map(c => {
+      const end = c.end_date || new Date();
+      const durationDays = Math.ceil((end - c.start_date) / (1000 * 60 * 60 * 24));
+      return {
+        _id: c._id,
+        name: c.name,
+        start_date: c.start_date,
+        end_date: c.end_date,
+        severity: c.severity,
+        duration_days: durationDays
+      };
+    });
+
     res.json(timeline);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -219,21 +222,25 @@ exports.getCampaignTimeline = async (req, res) => {
 // Severity distribution
 exports.getSeverityDistribution = async (req, res) => {
   try {
-    const [distribution] = await db.query(
-      `SELECT s.level as severity, COUNT(*) as count 
-       FROM campaigns c
-       JOIN severities s ON c.severity_id = s.severity_id
-       GROUP BY s.level 
-       ORDER BY 
-         CASE s.level
-           WHEN 'critical' THEN 1
-           WHEN 'high' THEN 2
-           WHEN 'medium' THEN 3
-           WHEN 'low' THEN 4
-         END`
-    );
-    
+    const distribution = await Campaign.aggregate([
+      { $group: { _id: '$severity', count: { $sum: 1 } } },
+      { $project: { severity: '$_id', count: 1, _id: 0 } },
+      { $sort: { count: -1 } }
+    ]);
     res.json(distribution);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Audit logs
+exports.getAuditLogs = async (req, res) => {
+  try {
+    const logs = await AuditLog.find()
+      .sort({ created_at: -1 })
+      .limit(50)
+      .lean();
+    res.json(logs);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

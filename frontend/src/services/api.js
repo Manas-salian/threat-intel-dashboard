@@ -11,7 +11,7 @@ const api = axios.create({
 
 // Indicators API
 export const indicatorAPI = {
-  getAll: () => api.get('/indicators'),
+  getAll: (params) => api.get('/indicators', { params }),
   getById: (id) => api.get(`/indicators/${id}`),
   getByType: (type) => api.get(`/indicators/type/${type}`),
   create: (data) => api.post('/indicators', data),
@@ -22,7 +22,7 @@ export const indicatorAPI = {
 
 // Threat Actors API
 export const actorAPI = {
-  getAll: () => api.get('/actors'),
+  getAll: (params) => api.get('/actors', { params }),
   getById: (id) => api.get(`/actors/${id}`),
   create: (data) => api.post('/actors', data),
   update: (id, data) => api.put(`/actors/${id}`, data),
@@ -31,7 +31,7 @@ export const actorAPI = {
 
 // Campaigns API
 export const campaignAPI = {
-  getAll: () => api.get('/campaigns'),
+  getAll: (params) => api.get('/campaigns', { params }),
   getById: (id) => api.get(`/campaigns/${id}`),
   getActive: () => api.get('/campaigns/active'),
   create: (data) => api.post('/campaigns', data),
@@ -55,36 +55,29 @@ export const analyticsAPI = {
   getActorActivity: () => api.get('/analytics/actors/activity'),
   getCampaignSeverity: () => api.get('/analytics/campaigns/severity'),
   getSourceReliability: () => api.get('/analytics/sources/reliability'),
+  getTopActors: (limit = 5) => api.get(`/analytics/top-actors?limit=${limit}`),
+  getAuditLogs: () => api.get('/analytics/audit-logs'),
 };
 
 // Correlations API
 export const correlationAPI = {
-  getIndicatorCorrelations: (id) => api.get(`/correlations/indicator/${id}`),
-  getCampaignActors: (id) => api.get(`/correlations/campaign/${id}/actors`),
-  getActorCampaigns: (id) => api.get(`/correlations/actor/${id}/campaigns`),
-  linkEntities: (data) => api.post('/correlations/link', data),
+  getCampaignsByIndicator: (value) => api.get(`/correlations/indicator/${value}/campaigns`),
+  getActorsByIndicator: (value) => api.get(`/correlations/indicator/${value}/actors`),
+  getRelatedIndicators: (id) => api.get(`/correlations/indicator/${id}/related`),
+  getThreatContext: (id) => api.get(`/correlations/indicator/${id}/context`),
 };
 
 // Ingestion API
 export const ingestAPI = {
-  ingestIndicators: (data) => api.post('/ingest/indicators', data),
-  ingestExternal: (data) => api.post('/ingest/external', data),
+  runAll: () => api.post('/ingest/run'),
+  runSource: (source) => api.post(`/ingest/run/${source}`),
   getStatus: () => api.get('/ingest/status'),
+  getHistory: () => api.get('/ingest/history'),
 };
 
 // Tools API
 export const toolsAPI = {
   checkIndicator: (value) => api.post('/tools/check', { value }),
-  backup: () => api.post('/tools/backup'),
-  restore: (filename) => api.post('/tools/restore', { filename }),
-  listBackups: () => api.get('/tools/backups'),
-};
-
-// Advanced Dashboard API
-export const advancedDashboardAPI = {
-  getStats: () => api.get('/dashboard/stats'),
-  getAuditLogs: () => api.get('/dashboard/audit-logs'),
-  getTopActors: () => api.get('/dashboard/top-actors'),
 };
 
 export default api;

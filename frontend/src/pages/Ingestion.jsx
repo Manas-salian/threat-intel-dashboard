@@ -1,12 +1,20 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Upload, Database, CheckCircle, XCircle } from 'lucide-react';
-import { indicatorAPI } from '../services/api';
+import { indicatorAPI, sourceAPI } from '../services/api';
 
 function Ingestion() {
   const [jsonData, setJsonData] = useState('');
-  const [sourceId, setSourceId] = useState('1');
+  const [sourceId, setSourceId] = useState('');
+  const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
+
+  useEffect(() => {
+    sourceAPI.getAll().then(res => {
+      setSources(res.data || []);
+      if (res.data?.length > 0) setSourceId(res.data[0]._id);
+    }).catch(() => {});
+  }, []);
 
   const handleBulkIngest = async (e) => {
     e.preventDefault();
@@ -17,7 +25,7 @@ function Ingestion() {
       const indicators = JSON.parse(jsonData);
       const response = await indicatorAPI.bulkIngest({
         indicators: Array.isArray(indicators) ? indicators : [indicators],
-        sourceId: parseInt(sourceId)
+        sourceId: sourceId || undefined
       });
       
       setResult({
@@ -92,14 +100,11 @@ function Ingestion() {
               className="form-control"
               value={sourceId}
               onChange={(e) => setSourceId(e.target.value)}
-              required
             >
-              <option value="1">AlienVault OTX</option>
-              <option value="2">VirusTotal</option>
-              <option value="3">AbuseIPDB</option>
-              <option value="4">MISP Community</option>
-              <option value="5">Abuse.ch</option>
-              <option value="6">EmergingThreats</option>
+              <option value="">No source</option>
+              {sources.map(s => (
+                <option key={s._id} value={s._id}>{s.name}</option>
+              ))}
             </select>
           </div>
 
